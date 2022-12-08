@@ -5,6 +5,7 @@ use super::{pid_alloc, KernelStack, PidHandle};
 use crate::config::TRAP_CONTEXT;
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
+use crate::timer::{get_time_us, get_time_ms};
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
@@ -16,6 +17,21 @@ use crate::mm::translated_refmut;
 /// Task control block structure
 ///
 /// Directly save the contents that will not change during running
+
+pub const BIG_STRIDE:u32=u32::MAX;
+
+#[derive(Copy,Clone)]
+pub struct CurTaskInfo{
+    pub sys_write:  u32,
+    pub sys_exit:   u32,
+    pub sys_info:   u32,
+    pub sys_time:   u32,
+    pub sys_yield:  u32,
+    pub begin_time: usize,
+    pub task_status:TaskStatus,
+}
+
+
 pub struct TaskControlBlock {
     // immutable
     /// Process identifier
@@ -48,8 +64,15 @@ pub struct TaskControlBlockInner {
     /// A vector containing TCBs of all child processes of the current process
     pub children: Vec<Arc<TaskControlBlock>>,
     /// It is set when active exit or execution error occurs
+    pub task_info: CurTaskInfo,
     pub exit_code: i32,
     pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
+
+    pub priority: u32,
+
+    pub pass: u128,
+
+    pub stride: u32,
 }
 
 /// Simple access to its internal fields
@@ -134,6 +157,10 @@ impl TaskControlBlock {
                         // 2 -> stderr
                         Some(Arc::new(Stdout)),
                     ],
+                    task_info:CurTaskInfo::zero_init(),
+                    priority:16,
+                    pass:0,
+                    stride:BIG_STRIDE/16,
                 })
             },
         };
@@ -158,6 +185,7 @@ impl TaskControlBlock {
             .ppn();
         // **** access inner exclusively
         let mut inner = self.inner_exclusive_access();
+        inner.task_info.begin_time=get_time_ms();
         // substitute memory_set
         inner.memory_set = memory_set;
         // update trap_cx ppn
@@ -210,6 +238,10 @@ impl TaskControlBlock {
                     children: Vec::new(),
                     exit_code: 0,
                     fd_table: new_fd_table,
+                    task_info:CurTaskInfo::zero_init(),
+                    priority:16,
+                    pass:0,
+                    stride:BIG_STRIDE/16,
                 })
             },
         });
@@ -227,7 +259,29 @@ impl TaskControlBlock {
     pub fn getpid(&self) -> usize {
         self.pid.0
     }
-
+    pub fn spwan(self:&Arc<TaskControlBlock>, _elf_data: &[u8])-> Arc<TaskControlBlock>{
+        let task_control_block=Arc::new(TaskControlBlock::new(_elf_data));
+        let mut inner=task_control_block.inner_exclusive_access();
+        inner.parent=Some(Arc::downgrade(self));
+        drop(inner);
+        let mut parent_inner=self.inner_exclusive_access();
+        parent_inner.children.push(task_control_block.clone());
+        drop(parent_inner);
+        task_control_block
+    }
+    pub fn task_mmap(&self,_start: usize, _len: usize, _port: usize) -> isize {
+        let mut inner=self.inner_exclusive_access();
+        let ret=inner.memory_set.mmap(_start, _len, _port);
+        drop(inner);
+        ret
+    }
+    
+    pub fn task_munmap(&self,_start: usize, _len: usize) -> isize {
+        let mut inner=self.inner_exclusive_access();
+        let ret=inner.memory_set.munmap(_start, _len);
+        drop(inner);
+        ret
+    }
 
 
 }
@@ -239,4 +293,10 @@ pub enum TaskStatus {
     Ready,
     Running,
     Zombie,
+}
+
+impl CurTaskInfo{
+    pub fn zero_init() -> Self{
+        CurTaskInfo { sys_write: 0, sys_exit: 0, sys_info: 0, sys_time: 0, sys_yield: 0, begin_time: 0, task_status:TaskStatus:: Ready }
+    }
 }

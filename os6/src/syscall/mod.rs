@@ -10,35 +10,36 @@
 //! `sys_` then the name of the syscall. You can find functions like this in
 //! submodules, and you should also implement syscalls this way.
 
-const SYSCALL_UNLINKAT: usize = 35;
-const SYSCALL_LINKAT: usize = 37;
-const SYSCALL_OPEN: usize = 56;
-const SYSCALL_CLOSE: usize = 57;
-const SYSCALL_READ: usize = 63;
-const SYSCALL_WRITE: usize = 64;
-const SYSCALL_FSTAT: usize = 80;
-const SYSCALL_EXIT: usize = 93;
-const SYSCALL_YIELD: usize = 124;
-const SYSCALL_GET_TIME: usize = 169;
-const SYSCALL_GETPID: usize = 172;
-const SYSCALL_FORK: usize = 220;
-const SYSCALL_EXEC: usize = 221;
-const SYSCALL_WAITPID: usize = 260;
-const SYSCALL_SPAWN: usize = 400;
-const SYSCALL_MUNMAP: usize = 215;
-const SYSCALL_MMAP: usize = 222;
-const SYSCALL_SET_PRIORITY: usize = 140;
-const SYSCALL_TASK_INFO: usize = 410;
+pub const SYSCALL_UNLINKAT: usize = 35;
+pub const SYSCALL_LINKAT: usize = 37;
+pub const SYSCALL_OPEN: usize = 56;
+pub const SYSCALL_CLOSE: usize = 57;
+pub const SYSCALL_READ: usize = 63;
+pub const SYSCALL_WRITE: usize = 64;
+pub const SYSCALL_FSTAT: usize = 80;
+pub const SYSCALL_EXIT: usize = 93;
+pub const SYSCALL_YIELD: usize = 124;
+pub const SYSCALL_GET_TIME: usize = 169;
+pub const SYSCALL_GETPID: usize = 172;
+pub const SYSCALL_FORK: usize = 220;
+pub const SYSCALL_EXEC: usize = 221;
+pub const SYSCALL_WAITPID: usize = 260;
+pub const SYSCALL_SPAWN: usize = 400;
+pub const SYSCALL_MUNMAP: usize = 215;
+pub const SYSCALL_MMAP: usize = 222;
+pub const SYSCALL_SET_PRIORITY: usize = 140;
+pub const SYSCALL_TASK_INFO: usize = 410;
 
 mod fs;
 pub mod process;
 
 use fs::*;
 use process::*;
-use crate::fs::Stat;
+use crate::{fs::Stat, task::update_task_info};
 
 /// handle syscall exception with `syscall_id` and other arguments
 pub fn syscall(syscall_id: usize, args: [usize; 4]) -> isize {
+    update_task_info(syscall_id);
     match syscall_id {
         SYSCALL_LINKAT => sys_linkat(args[1] as *const u8, args[3] as *const u8),
         SYSCALL_UNLINKAT => sys_unlinkat(args[1] as *const u8),

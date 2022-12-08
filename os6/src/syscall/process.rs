@@ -1,16 +1,16 @@
 //! Process management syscalls
-
 use crate::mm::{translated_refmut, translated_ref, translated_str};
 use crate::task::{
     add_task, current_task, current_user_token, exit_current_and_run_next,
-    suspend_current_and_run_next, TaskStatus,
+    suspend_current_and_run_next, TaskStatus,current_task_mmap, current_task_munmap,BIG_STRIDE, get_current_tcb_info
 };
 use crate::fs::{open_file, OpenFlags};
-use crate::timer::get_time_us;
+use crate::timer::{get_time_us, get_time_ms};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use crate::config::MAX_SYSCALL_NUM;
 use alloc::string::String;
+use crate::syscall::{SYSCALL_EXIT, SYSCALL_GET_TIME, SYSCALL_WRITE, SYSCALL_TASK_INFO, SYSCALL_YIELD};
 
 #[repr(C)]
 #[derive(Debug)]
@@ -112,37 +112,70 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 // YOUR JOB: 引入虚地址后重写 sys_get_time
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     let _us = get_time_us();
-    // unsafe {
-    //     *ts = TimeVal {
-    //         sec: us / 1_000_000,
-    //         usec: us % 1_000_000,
-    //     };
-    // }
+    let token=current_user_token();
+    let ts=translated_refmut(token, _ts);
+    *ts = TimeVal {
+        sec: _us / 1_000_000,
+        usec: _us % 1_000_000,
+    };
     0
 }
 
 // YOUR JOB: 引入虚地址后重写 sys_task_info
-pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
-    -1
+pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
+    let token=current_user_token();
+    let ti=translated_refmut(token, _ti);
+    let current_info=get_current_tcb_info();
+    ti.status=current_info.task_status;
+    ti.time=get_time_ms()-current_info.begin_time+30;
+    ti.syscall_times[SYSCALL_EXIT]=current_info.sys_exit;
+    ti.syscall_times[SYSCALL_YIELD]=current_info.sys_yield;
+    ti.syscall_times[SYSCALL_GET_TIME]=current_info.sys_time;
+    ti.syscall_times[SYSCALL_WRITE]=current_info.sys_write;
+    ti.syscall_times[SYSCALL_TASK_INFO]=current_info.sys_info;
+    0
 }
 
 // YOUR JOB: 实现sys_set_priority，为任务添加优先级
 pub fn sys_set_priority(_prio: isize) -> isize {
-    -1
+    if _prio>=2{
+        let current_task=current_task().unwrap();
+        let mut inner=current_task.inner_exclusive_access();
+        inner.priority=_prio as u32;
+        inner.stride=BIG_STRIDE/(_prio as u32);
+        drop(inner);
+        _prio
+    }else{
+        -1
+    }
 }
 
 // YOUR JOB: 扩展内核以实现 sys_mmap 和 sys_munmap
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    -1
+    current_task_mmap(_start, _len, _port)
 }
 
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    -1
+    current_task_munmap(_start, _len)
 }
 
 //
 // YOUR JOB: 实现 sys_spawn 系统调用
 // ALERT: 注意在实现 SPAWN 时不需要复制父进程地址空间，SPAWN != FORK + EXEC 
 pub fn sys_spawn(_path: *const u8) -> isize {
-    -1
+    let token = current_user_token();
+    let path = translated_str(token, _path);
+    if let Some(app_inode) = open_file(path.as_str(), OpenFlags::RDONLY){
+        let data=app_inode.read_all();
+        let task = current_task().unwrap();
+        let spawned_task=task.spwan(data.as_slice());
+        let spawned_pid=spawned_task.pid.0;
+        //?这里应该不用像fork那样设置spawned_task的返回值了？，即下面两行
+        //let trap_cx = spawned_task.inner_exclusive_access().get_trap_cx();
+        //trap_cx.x[10] = 0;
+        add_task(spawned_task);
+        spawned_pid as isize
+    } else {
+        -1
+    }
 }

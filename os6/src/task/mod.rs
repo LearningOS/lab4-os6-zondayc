@@ -27,7 +27,8 @@ use crate::config::PAGE_SIZE;
 use crate::timer::get_time_us;
 pub use crate::syscall::process::TaskInfo;
 use crate::fs::{open_file, OpenFlags};
-pub use task::{TaskControlBlock, TaskStatus};
+pub use task::{TaskControlBlock, TaskStatus,BIG_STRIDE,CurTaskInfo};
+use crate::syscall::{SYSCALL_EXIT, SYSCALL_GET_TIME, SYSCALL_WRITE, SYSCALL_TASK_INFO, SYSCALL_YIELD};
 
 pub use context::TaskContext;
 pub use manager::add_task;
@@ -46,6 +47,7 @@ pub fn suspend_current_and_run_next() {
     let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
     // Change status to Ready
     task_inner.task_status = TaskStatus::Ready;
+    task_inner.task_info.task_status=TaskStatus::Ready;
     drop(task_inner);
     // ---- release current PCB
 
@@ -103,4 +105,32 @@ lazy_static! {
 
 pub fn add_initproc() {
     add_task(INITPROC.clone());
+}
+
+pub fn current_task_mmap(_start: usize, _len: usize, _port: usize) -> isize {
+    let current_task=current_task().unwrap();
+    current_task.task_mmap(_start, _len, _port)
+}
+pub fn current_task_munmap(_start: usize, _len: usize) -> isize {
+    let current_task=current_task().unwrap();
+    current_task.task_munmap(_start, _len)
+}
+
+pub fn get_current_tcb_info()->CurTaskInfo{
+    let current_task=current_task().unwrap();
+    let inner=current_task.inner_exclusive_access();
+    inner.task_info.clone()
+}
+
+pub fn update_task_info(syscall_id:usize){
+    let current_task=current_task().unwrap();
+    let mut inner=current_task.inner_exclusive_access();
+    match syscall_id {
+        SYSCALL_EXIT=>inner.task_info.sys_exit+=1,
+        SYSCALL_GET_TIME=>inner.task_info.sys_time+=1,
+        SYSCALL_WRITE=>inner.task_info.sys_write+=1,
+        SYSCALL_TASK_INFO=>inner.task_info.sys_info+=1,
+        SYSCALL_YIELD=>inner.task_info.sys_yield+=1,
+        _=>(),
+    }
 }
