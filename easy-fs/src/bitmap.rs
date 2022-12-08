@@ -38,18 +38,18 @@ impl Bitmap {
             let pos = get_block_cache(
                 block_id + self.start_block_id as usize,
                 Arc::clone(block_device),
-            ).lock().modify(0, |bitmap_block: &mut BitmapBlock| {
+            ).lock().modify(0, |bitmap_block: &mut BitmapBlock| {//这里的||是在具体声明要解析的数据的类型
                 if let Some((bits64_pos, inner_pos)) = bitmap_block
                     .iter()
                     .enumerate()
-                    .find(|(_, bits64)| **bits64 != u64::MAX)
-                    .map(|(bits64_pos, bits64)| {
+                    .find(|(_, bits64)| **bits64 != u64::MAX)//这里是在找到一个空闲的Bit
+                    .map(|(bits64_pos, bits64)| {//找到最低的0并置为1
                         (bits64_pos, bits64.trailing_ones() as usize)
                     }) {
                     // modify cache
                     bitmap_block[bits64_pos] |= 1u64 << inner_pos;
-                    Some(block_id * BLOCK_BITS + bits64_pos * 64 + inner_pos as usize)
-                } else {
+                    Some(block_id * BLOCK_BITS + bits64_pos * 64 + inner_pos as usize)//这里是设置返回值，返回的是分配的bit的所在位置
+                } else {//but上面那里为什么是+inner_pos
                     None
                 }
             });
